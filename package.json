@@ -1,6 +1,6 @@
 {
   "name": "estercorrida-2026",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "dependencies": {
     "@supabase/supabase-js": "^2.39.0",

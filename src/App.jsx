@@ -7,7 +7,7 @@ import { createClient } from "@supabase/supabase-js";
 
 // ─── CONFIGURE AQUI ───────────────────────────────────────────
 const SUPABASE_URL = "https://zwoiscpfxnzyxuyrsbwy.supabase.co";
-const SUPABASE_ANON_KEY = "sb_secret_2UdC63G-Z0nGsSRhcY6EWw_NX-RSiO_";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp3b2lzY3BmeG56eXh1eXJzYnd5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIzOTEwMDEsImV4cCI6MjA5Nzk2NzAwMX0.cDAIBk7KQotxmSMzRCJSyj-jUrsGu4gqmO3lhP8bWW4";
 // ──────────────────────────────────────────────────────────────
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);

@@ -6,6 +6,7 @@ const SUPABASE_URL = "https://zwoiscpfxnzyxuyrsbwy.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp3b2lzY3BmeG56eXh1eXJzYnd5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIzOTEwMDEsImV4cCI6MjA5Nzk2NzAwMX0.cDAIBk7KQotxmSMzRCJSyj-jUrsGu4gqmO3lhP8bWW4";
 const GEMINI_API_KEY = process.env.REACT_APP_GEMINI_KEY;
 const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`;
+
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 function calcBasePts(dist) {
@@ -70,29 +71,45 @@ Analise esta imagem e extraia SOMENTE os dados de corrida visíveis. Responda AP
   "data": "YYYY-MM-DD" (data da corrida se visível, senão null),
   "elevacao_m": número em metros (ganho de elevação, 0 se não visível),
   "app_detectado": "nome do app ou dispositivo",
-  "confianca": "alta" | "media" | "baixa"
+  "confianca": "alta"
 }
 
-Se não conseguir identificar a distância, retorne {"erro": "Não foi possível identificar os dados de corrida na imagem"}.`;
+Se não conseguir identificar a distância, retorne {"erro": "nao identificado"}.`;
 
-  const response = await fetch(GEMINI_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      contents: [{
-        parts: [
-          { text: prompt },
-          { inline_data: { mime_type: mimeType, data: base64Image } }
-        ]
-      }],
-      generationConfig: { temperature: 0.1, maxOutputTokens: 256 }
-    })
-  });
+  try {
+    const response = await fetch(GEMINI_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{
+          parts: [
+            { text: prompt },
+            { inline_data: { mime_type: mimeType, data: base64Image } }
+          ]
+        }],
+        generationConfig: { temperature: 0.1, maxOutputTokens: 512 }
+      })
+    });
 
-  const data = await response.json();
-  const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
-  const clean = text.replace(/```json|```/g, "").trim();
-  return JSON.parse(clean);
+    if (!response.ok) {
+      const errBody = await response.text();
+      throw new Error("API erro " + response.status + ": " + errBody);
+    }
+
+    const data = await response.json();
+    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+    if (!text) throw new Error("Resposta vazia da API");
+
+    const clean = text.replace(/```json/g, "").replace(/```/g, "").trim();
+    const firstBrace = clean.indexOf("{");
+    const lastBrace = clean.lastIndexOf("}");
+    if (firstBrace === -1 || lastBrace === -1) throw new Error("JSON nao encontrado: " + clean);
+
+    return JSON.parse(clean.slice(firstBrace, lastBrace + 1));
+
+  } catch (err) {
+    return { erro: err.message || "Erro desconhecido" };
+  }
 }
 
 function Avatar({ runner, size = 38 }) {
@@ -219,24 +236,18 @@ function RegistrarTab({ runners, currentUser, onSuccess }) {
       const base64 = base64Full.split(",")[1];
       const mimeType = file.type;
 
-      try {
-        const result = await analyzeRunImage(base64, mimeType);
-        if (result.erro) {
-          setMsg({ type: "err", text: result.erro });
-        } else {
-          if (result.distancia_km) setDist(String(result.distancia_km));
-          if (result.pace) setPace(result.pace);
-          if (result.data) setDate(result.data);
-          if (result.elevacao_m) setElev(String(result.elevacao_m));
-          if (result.elevacao_m >= 50) setTerrain("trail");
-          setAppDetected(result.app_detectado);
-          setMsg({
-            type: "ok",
-            text: `✓ Dados lidos com ${result.confianca === "alta" ? "alta" : result.confianca === "media" ? "média" : "baixa"} confiança. Confira os campos abaixo antes de registrar.`
-          });
-        }
-      } catch {
-        setMsg({ type: "err", text: "Erro técnico: " + (err?.message || JSON.stringify(err)) });
+      const result = await analyzeRunImage(base64, mimeType);
+
+      if (result.erro) {
+        setMsg({ type: "err", text: "Erro: " + result.erro });
+      } else {
+        if (result.distancia_km) setDist(String(result.distancia_km));
+        if (result.pace) setPace(result.pace);
+        if (result.data) setDate(result.data);
+        if (result.elevacao_m) setElev(String(result.elevacao_m));
+        if (result.elevacao_m >= 50) setTerrain("trail");
+        setAppDetected(result.app_detectado);
+        setMsg({ type: "ok", text: `✓ Dados lidos! Confira os campos abaixo antes de registrar.` });
       }
       setAnalyzing(false);
     };

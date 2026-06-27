@@ -236,7 +236,7 @@ function RegistrarTab({ runners, currentUser, onSuccess }) {
           });
         }
       } catch {
-        setMsg({ type: "err", text: "Não consegui ler a imagem. Tente um print mais nítido ou preencha manualmente." });
+        setMsg({ type: "err", text: "Erro técnico: " + (err?.message || JSON.stringify(err)) });
       }
       setAnalyzing(false);
     };

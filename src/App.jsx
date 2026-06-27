@@ -1,18 +1,14 @@
-// EsterCorrida 2026 — App React completo com Supabase
-// Instale: npm install @supabase/supabase-js
-// Configure as variáveis abaixo com seus dados do Supabase
-
-import { useState, useEffect, useCallback } from "react";
+// EsterCorrida 2026 — App React completo com Supabase + Gemini Vision
+import { useState, useEffect, useCallback, useRef } from "react";
 import { createClient } from "@supabase/supabase-js";
 
-// ─── CONFIGURE AQUI ───────────────────────────────────────────
 const SUPABASE_URL = "https://zwoiscpfxnzyxuyrsbwy.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp3b2lzY3BmeG56eXh1eXJzYnd5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIzOTEwMDEsImV4cCI6MjA5Nzk2NzAwMX0.cDAIBk7KQotxmSMzRCJSyj-jUrsGu4gqmO3lhP8bWW4";
-// ──────────────────────────────────────────────────────────────
+const GEMINI_API_KEY = process.env.REACT_APP_GEMINI_KEY;
+const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`;
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-// ─── REGRAS DE PONTUAÇÃO ──────────────────────────────────────
 function calcBasePts(dist) {
   if (dist < 3) return 0;
   if (dist >= 42.195) return 12;
@@ -43,69 +39,83 @@ function validateActivity(dist, pace, terrain, elev) {
 }
 
 const BADGE_THRESHOLDS = [
-  { min: 400, emoji: "🏆", label: "400+" },
-  { min: 350, emoji: "🥇", label: "350+" },
-  { min: 300, emoji: "🇳🇬", label: "300+" },
-  { min: 225, emoji: "🟢", label: "225+" },
-  { min: 180, emoji: "⚫️", label: "180+" },
-  { min: 140, emoji: "🟣", label: "140+" },
-  { min: 105, emoji: "🟠", label: "105+" },
-  { min: 75,  emoji: "🔴", label: "75+" },
-  { min: 50,  emoji: "🔵", label: "50+" },
-  { min: 30,  emoji: "🟡", label: "30+" },
-  { min: 15,  emoji: "⚪", label: "15+" },
+  { min: 400, emoji: "🏆" }, { min: 350, emoji: "🥇" }, { min: 300, emoji: "🇳🇬" },
+  { min: 225, emoji: "🟢" }, { min: 180, emoji: "⚫️" }, { min: 140, emoji: "🟣" },
+  { min: 105, emoji: "🟠" }, { min: 75, emoji: "🔴" }, { min: 50, emoji: "🔵" },
+  { min: 30, emoji: "🟡" }, { min: 15, emoji: "⚪" },
 ];
 
 function getBadge(pts) {
-  for (const b of BADGE_THRESHOLDS) {
-    if (pts >= b.min) return b.emoji;
-  }
+  for (const b of BADGE_THRESHOLDS) { if (pts >= b.min) return b.emoji; }
   return "";
 }
 
 const AVATAR_COLORS = [
-  { bg: "#1D9E75", fg: "#fff" }, { bg: "#378ADD", fg: "#fff" },
-  { bg: "#BA7517", fg: "#fff" }, { bg: "#D4537E", fg: "#fff" },
-  { bg: "#7F77DD", fg: "#fff" }, { bg: "#639922", fg: "#fff" },
-  { bg: "#D85A30", fg: "#fff" }, { bg: "#888780", fg: "#fff" },
-  { bg: "#185FA5", fg: "#fff" }, { bg: "#3B6D11", fg: "#fff" },
-  { bg: "#993556", fg: "#fff" }, { bg: "#985F0D", fg: "#fff" },
+  { bg: "#1D9E75", fg: "#fff" }, { bg: "#378ADD", fg: "#fff" }, { bg: "#BA7517", fg: "#fff" },
+  { bg: "#D4537E", fg: "#fff" }, { bg: "#7F77DD", fg: "#fff" }, { bg: "#639922", fg: "#fff" },
+  { bg: "#D85A30", fg: "#fff" }, { bg: "#888780", fg: "#fff" }, { bg: "#185FA5", fg: "#fff" },
+  { bg: "#3B6D11", fg: "#fff" }, { bg: "#993556", fg: "#fff" }, { bg: "#985F0D", fg: "#fff" },
 ];
 
-function getAvatarColor(id) {
-  return AVATAR_COLORS[(id - 1) % AVATAR_COLORS.length];
+function getAvatarColor(id) { return AVATAR_COLORS[(id - 1) % AVATAR_COLORS.length]; }
+function getInitials(name) { return name.split(" ").map(p => p[0]).slice(0, 2).join("").toUpperCase(); }
+
+async function analyzeRunImage(base64Image, mimeType) {
+  const prompt = `Você é um assistente especializado em leitura de prints de apps de corrida (Strava, Garmin, Nike Run, Apple Watch, relógios esportivos, etc).
+
+Analise esta imagem e extraia SOMENTE os dados de corrida visíveis. Responda APENAS com JSON válido, sem texto extra:
+
+{
+  "distancia_km": número em km (ex: 10.2),
+  "pace": "M:SS" (pace médio por km, ex: "5:30"),
+  "data": "YYYY-MM-DD" (data da corrida se visível, senão null),
+  "elevacao_m": número em metros (ganho de elevação, 0 se não visível),
+  "app_detectado": "nome do app ou dispositivo",
+  "confianca": "alta" | "media" | "baixa"
 }
 
-function getInitials(name) {
-  return name.split(" ").map((p) => p[0]).slice(0, 2).join("").toUpperCase();
+Se não conseguir identificar a distância, retorne {"erro": "Não foi possível identificar os dados de corrida na imagem"}.`;
+
+  const response = await fetch(GEMINI_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      contents: [{
+        parts: [
+          { text: prompt },
+          { inline_data: { mime_type: mimeType, data: base64Image } }
+        ]
+      }],
+      generationConfig: { temperature: 0.1, maxOutputTokens: 256 }
+    })
+  });
+
+  const data = await response.json();
+  const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+  const clean = text.replace(/```json|```/g, "").trim();
+  return JSON.parse(clean);
 }
 
-// ─── COMPONENTES ─────────────────────────────────────────────
-
-function Avatar({ runner }) {
+function Avatar({ runner, size = 38 }) {
   const c = getAvatarColor(runner.id);
   return (
     <div style={{
-      width: 38, height: 38, borderRadius: "50%",
-      background: c.bg, color: c.fg,
+      width: size, height: size, borderRadius: "50%", background: c.bg, color: c.fg,
       display: "flex", alignItems: "center", justifyContent: "center",
-      fontWeight: 600, fontSize: 13, flexShrink: 0,
+      fontWeight: 600, fontSize: Math.floor(size * 0.36), flexShrink: 0,
     }}>
       {getInitials(runner.name)}
     </div>
   );
 }
 
-function Badge({ gender }) {
+function GenderBadge({ gender }) {
   return (
     <span style={{
-      fontSize: 10, padding: "2px 6px", borderRadius: 3, fontWeight: 600,
+      fontSize: 10, padding: "2px 6px", borderRadius: 3, fontWeight: 600, marginLeft: 4,
       background: gender === "M" ? "#E6F1FB" : "#FBEAF0",
       color: gender === "M" ? "#185FA5" : "#993556",
-      marginLeft: 4,
-    }}>
-      {gender}
-    </span>
+    }}>{gender}</span>
   );
 }
 
@@ -115,32 +125,23 @@ function SerieBadge({ serie }) {
       fontSize: 11, padding: "3px 8px", borderRadius: 4, fontWeight: 500,
       background: serie === "A" ? "#E1F5EE" : "#E6F1FB",
       color: serie === "A" ? "#0F6E56" : "#185FA5",
-      display: "inline-flex", alignItems: "center", gap: 4,
-    }}>
-      Série {serie}
-    </span>
+    }}>Série {serie}</span>
   );
 }
 
-// ─── TAB: RANKING ─────────────────────────────────────────────
 function RankingTab({ runners, onSelectRunner }) {
-  const serieA = [...runners].filter((r) => r.serie === "A").sort((a, b) => b.pts - a.pts || b.total_km - a.total_km);
-  const serieB = [...runners].filter((r) => r.serie === "B").sort((a, b) => b.pts - a.pts || b.total_km - a.total_km);
+  const serieA = [...runners].filter(r => r.serie === "A").sort((a, b) => b.pts - a.pts || b.total_km - a.total_km);
+  const serieB = [...runners].filter(r => r.serie === "B").sort((a, b) => b.pts - a.pts || b.total_km - a.total_km);
 
   const renderList = (list, serie) => list.map((r, i) => {
+    const medal = i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : null;
     const isLast = serie === "A" && i === list.length - 1;
     const isPromo = serie === "B" && i < 2;
-    const medal = i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : null;
-    const badge = getBadge(r.pts);
     return (
-      <div key={r.id} onClick={() => onSelectRunner(r)}
-        style={{
-          display: "flex", alignItems: "center", gap: 12,
-          padding: "10px 14px", marginBottom: 6,
-          background: "#fff", border: "0.5px solid #e5e5e3",
-          borderRadius: 12, cursor: "pointer",
-          transition: "border-color .15s",
-        }}
+      <div key={r.id} onClick={() => onSelectRunner(r)} style={{
+        display: "flex", alignItems: "center", gap: 12, padding: "10px 14px", marginBottom: 6,
+        background: "#fff", border: "0.5px solid #e5e5e3", borderRadius: 12, cursor: "pointer", transition: "border-color .15s",
+      }}
         onMouseEnter={e => e.currentTarget.style.borderColor = "#bbb"}
         onMouseLeave={e => e.currentTarget.style.borderColor = "#e5e5e3"}
       >
@@ -150,10 +151,10 @@ function RankingTab({ runners, onSelectRunner }) {
         <Avatar runner={r} />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 14, fontWeight: 500, display: "flex", alignItems: "center", flexWrap: "wrap", gap: 4 }}>
-            {r.name} <Badge gender={r.gender} />
-            {badge && <span style={{ fontSize: 16 }}>{badge}</span>}
-            {isLast && <span style={{ fontSize: 10, color: "#A32D2D", fontWeight: 600 }}>⬇ rebaixamento</span>}
-            {isPromo && <span style={{ fontSize: 10, color: "#0F6E56", fontWeight: 600 }}>⬆ acesso Série A</span>}
+            {r.name} <GenderBadge gender={r.gender} />
+            {getBadge(r.pts) && <span style={{ fontSize: 16 }}>{getBadge(r.pts)}</span>}
+            {isLast && <span style={{ fontSize: 10, background: "#FCEBEB", color: "#791F1F", padding: "2px 6px", borderRadius: 3, fontWeight: 600 }}>⬇ rebaixamento</span>}
+            {isPromo && <span style={{ fontSize: 10, background: "#E1F5EE", color: "#085041", padding: "2px 6px", borderRadius: 3, fontWeight: 600 }}>⬆ acesso A</span>}
           </div>
           <div style={{ fontSize: 12, color: "#888", marginTop: 2 }}>{r.total_km.toFixed(1)} km</div>
         </div>
@@ -182,7 +183,6 @@ function RankingTab({ runners, onSelectRunner }) {
   );
 }
 
-// ─── TAB: REGISTRAR ──────────────────────────────────────────
 function RegistrarTab({ runners, currentUser, onSuccess }) {
   const [dist, setDist] = useState("");
   const [pace, setPace] = useState("");
@@ -192,7 +192,11 @@ function RegistrarTab({ runners, currentUser, onSuccess }) {
   const [date, setDate] = useState(new Date().toISOString().split("T")[0]);
   const [notes, setNotes] = useState("");
   const [loading, setLoading] = useState(false);
+  const [analyzing, setAnalyzing] = useState(false);
   const [msg, setMsg] = useState(null);
+  const [previewImg, setPreviewImg] = useState(null);
+  const [appDetected, setAppDetected] = useState(null);
+  const fileRef = useRef();
 
   const distNum = parseFloat(dist) || 0;
   const elevNum = parseInt(elev) || 0;
@@ -201,6 +205,44 @@ function RegistrarTab({ runners, currentUser, onSuccess }) {
   const bonusPts = bonusMap[bonusType] || 0;
   const totalPts = basePts + bonusPts;
   const errors = distNum > 0 ? validateActivity(distNum, pace, terrain, elevNum) : [];
+
+  async function handleImageUpload(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    setAnalyzing(true);
+    setMsg(null);
+    setAppDetected(null);
+
+    const reader = new FileReader();
+    reader.onload = async (ev) => {
+      const base64Full = ev.target.result;
+      setPreviewImg(base64Full);
+      const base64 = base64Full.split(",")[1];
+      const mimeType = file.type;
+
+      try {
+        const result = await analyzeRunImage(base64, mimeType);
+        if (result.erro) {
+          setMsg({ type: "err", text: result.erro });
+        } else {
+          if (result.distancia_km) setDist(String(result.distancia_km));
+          if (result.pace) setPace(result.pace);
+          if (result.data) setDate(result.data);
+          if (result.elevacao_m) setElev(String(result.elevacao_m));
+          if (result.elevacao_m >= 50) setTerrain("trail");
+          setAppDetected(result.app_detectado);
+          setMsg({
+            type: "ok",
+            text: `✓ Dados lidos com ${result.confianca === "alta" ? "alta" : result.confianca === "media" ? "média" : "baixa"} confiança. Confira os campos abaixo antes de registrar.`
+          });
+        }
+      } catch {
+        setMsg({ type: "err", text: "Não consegui ler a imagem. Tente um print mais nítido ou preencha manualmente." });
+      }
+      setAnalyzing(false);
+    };
+    reader.readAsDataURL(file);
+  }
 
   async function submit() {
     if (!currentUser) { setMsg({ type: "err", text: "Selecione seu nome primeiro (topo da tela)." }); return; }
@@ -225,7 +267,7 @@ function RegistrarTab({ runners, currentUser, onSuccess }) {
         total_km: parseFloat((currentUser.total_km + distNum).toFixed(2)),
       }).eq("id", currentUser.id);
       setMsg({ type: "ok", text: `✓ Atividade registrada! +${totalPts} ptos para ${currentUser.name}` });
-      setDist(""); setPace(""); setElev(""); setBonusType("none"); setNotes("");
+      setDist(""); setPace(""); setElev(""); setBonusType("none"); setNotes(""); setPreviewImg(null); setAppDetected(null);
       onSuccess();
     } else {
       setMsg({ type: "err", text: "Erro ao salvar. Tente novamente." });
@@ -233,15 +275,37 @@ function RegistrarTab({ runners, currentUser, onSuccess }) {
     setLoading(false);
   }
 
-  const inputStyle = {
-    width: "100%", padding: "8px 10px", borderRadius: 8,
-    border: "0.5px solid #ddd", fontSize: 14, background: "#fff",
-    color: "#111", outline: "none",
-  };
+  const inputStyle = { width: "100%", padding: "8px 10px", borderRadius: 8, border: "0.5px solid #ddd", fontSize: 14, background: "#fff", color: "#111", outline: "none" };
   const labelStyle = { fontSize: 12, color: "#888", marginBottom: 3, display: "block" };
 
   return (
     <div style={{ background: "#f8f8f7", borderRadius: 12, padding: 16, border: "0.5px solid #eee" }}>
+      <input ref={fileRef} type="file" accept="image/*" capture="environment" style={{ display: "none" }} onChange={handleImageUpload} />
+      <div
+        onClick={() => fileRef.current.click()}
+        style={{ border: "1.5px dashed #1D9E75", borderRadius: 12, padding: "16px", textAlign: "center", cursor: "pointer", marginBottom: 14, background: "#E1F5EE" }}
+      >
+        {analyzing ? (
+          <div>
+            <div style={{ fontSize: 28, marginBottom: 6 }}>🔍</div>
+            <div style={{ fontSize: 14, fontWeight: 500, color: "#0F6E56" }}>Analisando o print...</div>
+            <div style={{ fontSize: 12, color: "#5DCAA5", marginTop: 4 }}>A IA está lendo os dados da sua corrida</div>
+          </div>
+        ) : previewImg ? (
+          <div>
+            <img src={previewImg} alt="Print da corrida" style={{ maxHeight: 120, borderRadius: 8, marginBottom: 8, maxWidth: "100%" }} />
+            {appDetected && <div style={{ fontSize: 11, color: "#0F6E56", fontWeight: 500 }}>📱 {appDetected} · Toque para trocar</div>}
+          </div>
+        ) : (
+          <div>
+            <div style={{ fontSize: 32, marginBottom: 6 }}>📸</div>
+            <div style={{ fontSize: 14, fontWeight: 500, color: "#0F6E56" }}>Enviar print da corrida</div>
+            <div style={{ fontSize: 12, color: "#5DCAA5", marginTop: 4 }}>Strava, Garmin, Nike Run, Apple Watch...</div>
+            <div style={{ fontSize: 11, color: "#9FE1CB", marginTop: 2 }}>A IA preenche os campos automaticamente</div>
+          </div>
+        )}
+      </div>
+
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
         <div>
           <label style={labelStyle}>Data</label>
@@ -277,17 +341,14 @@ function RegistrarTab({ runners, currentUser, onSuccess }) {
           </select>
         </div>
       </div>
+
       <div style={{ marginBottom: 10 }}>
         <label style={labelStyle}>Observações (opcional)</label>
         <input type="text" placeholder="ex: Corrida no Aterro..." value={notes} onChange={e => setNotes(e.target.value)} style={inputStyle} />
       </div>
 
       {distNum >= 3 && (
-        <div style={{
-          background: "#fff", border: "0.5px solid #ddd", borderRadius: 10,
-          padding: "10px 14px", marginBottom: 10,
-          display: "flex", alignItems: "center", justifyContent: "space-between",
-        }}>
+        <div style={{ background: "#fff", border: "0.5px solid #ddd", borderRadius: 10, padding: "10px 14px", marginBottom: 10, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <div>
             <div style={{ fontSize: 12, color: "#888" }}>Pontos a ganhar</div>
             <div style={{ fontSize: 24, fontWeight: 700, color: "#1D9E75" }}>{totalPts} {totalPts === 1 ? "pto" : "ptos"}</div>
@@ -299,35 +360,17 @@ function RegistrarTab({ runners, currentUser, onSuccess }) {
         </div>
       )}
 
-      {errors.length > 0 && (
-        <div style={{ background: "#FAEEDA", color: "#633806", padding: "8px 12px", borderRadius: 8, fontSize: 13, marginBottom: 10 }}>
-          ⚠ {errors[0]}
-        </div>
-      )}
+      {errors.length > 0 && <div style={{ background: "#FAEEDA", color: "#633806", padding: "8px 12px", borderRadius: 8, fontSize: 13, marginBottom: 10 }}>⚠ {errors[0]}</div>}
+      {msg && <div style={{ background: msg.type === "ok" ? "#E1F5EE" : "#FCEBEB", color: msg.type === "ok" ? "#085041" : "#791F1F", padding: "8px 12px", borderRadius: 8, fontSize: 13, marginBottom: 10 }}>{msg.text}</div>}
 
-      {msg && (
-        <div style={{
-          background: msg.type === "ok" ? "#E1F5EE" : "#FCEBEB",
-          color: msg.type === "ok" ? "#085041" : "#791F1F",
-          padding: "8px 12px", borderRadius: 8, fontSize: 13, marginBottom: 10,
-        }}>
-          {msg.text}
-        </div>
-      )}
-
-      <button onClick={submit} disabled={loading || errors.length > 0}
-        style={{
-          width: "100%", padding: "10px 0", borderRadius: 8, border: "none",
-          background: errors.length > 0 ? "#ccc" : "#1D9E75",
-          color: "#fff", fontWeight: 600, fontSize: 15, cursor: errors.length > 0 ? "not-allowed" : "pointer",
-        }}>
+      <button onClick={submit} disabled={loading || errors.length > 0 || analyzing}
+        style={{ width: "100%", padding: "10px 0", borderRadius: 8, border: "none", background: (errors.length > 0 || analyzing) ? "#ccc" : "#1D9E75", color: "#fff", fontWeight: 600, fontSize: 15, cursor: (errors.length > 0 || analyzing) ? "not-allowed" : "pointer" }}>
         {loading ? "Registrando..." : "Registrar atividade"}
       </button>
     </div>
   );
 }
 
-// ─── TAB: RECORDES ───────────────────────────────────────────
 function RecordesTab({ records }) {
   const dists = ["5km", "10km", "21km", "42km"];
   return (
@@ -337,19 +380,18 @@ function RecordesTab({ records }) {
         const fem = records.filter(r => r.distance === d && r.gender === "F").sort((a, b) => a.time_str.localeCompare(b.time_str));
         return (
           <div key={d} style={{ marginBottom: 20 }}>
-            <div style={{ fontSize: 12, fontWeight: 600, color: "#888", letterSpacing: ".5px", textTransform: "uppercase", marginBottom: 8 }}>
-              Ranking {d}
-            </div>
+            <div style={{ fontSize: 12, fontWeight: 600, color: "#888", letterSpacing: ".5px", textTransform: "uppercase", marginBottom: 8 }}>Ranking {d}</div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
               {[{ list: masc, label: "Masculino" }, { list: fem, label: "Feminino" }].map(({ list, label }) => (
                 <div key={label} style={{ background: "#fff", border: "0.5px solid #e5e5e3", borderRadius: 10, padding: "10px 12px" }}>
                   <div style={{ fontSize: 11, color: "#aaa", marginBottom: 6 }}>{label}</div>
-                  {list.length === 0 ? <div style={{ fontSize: 12, color: "#ccc" }}>—</div> : list.slice(0, 5).map((r, i) => (
-                    <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 13, padding: "4px 0", borderBottom: i < list.slice(0,5).length - 1 ? "0.5px solid #f0f0f0" : "none" }}>
-                      <span style={{ color: "#555" }}>{i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : `${i + 1}.`} {r.runner_name}</span>
-                      <span style={{ fontWeight: 600, color: "#111" }}>{r.time_str}</span>
-                    </div>
-                  ))}
+                  {list.length === 0 ? <div style={{ fontSize: 12, color: "#ccc" }}>—</div> :
+                    list.slice(0, 5).map((r, i) => (
+                      <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 13, padding: "4px 0", borderBottom: i < Math.min(list.length, 5) - 1 ? "0.5px solid #f0f0f0" : "none" }}>
+                        <span style={{ color: "#555" }}>{i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : `${i + 1}.`} {r.runner_name}</span>
+                        <span style={{ fontWeight: 600, color: "#111" }}>{r.time_str}</span>
+                      </div>
+                    ))}
                 </div>
               ))}
             </div>
@@ -360,42 +402,42 @@ function RecordesTab({ records }) {
   );
 }
 
-// ─── TAB: REGRAS ─────────────────────────────────────────────
 function RegrasTab() {
-  const rows = (items) => items.map(([label, val]) => (
-    <div key={label} style={{ display: "flex", justifyContent: "space-between", padding: "7px 0", borderBottom: "0.5px solid #f0f0f0", fontSize: 13 }}>
-      <span style={{ color: "#666" }}>{label}</span>
-      <span style={{ fontWeight: 600, color: "#111" }}>{val}</span>
-    </div>
-  ));
+  const sections = [
+    ["Pontuação por distância", [
+      ["3 – 6,99 km", "1 pto"], ["7 – 9,99 km", "2 ptos"], ["10 – 12,99 km", "3 ptos"],
+      ["13 – 16,99 km", "4 ptos"], ["17 – 20,99 km", "5 ptos"], ["21 – 24,99 km", "6 ptos"],
+      ["25 – 29,99 km", "7 ptos"], ["30 – 42,19 km", "9 ptos"], ["42,195 km+ (maratona)", "12 ptos"],
+    ]],
+    ["Bônus (não cumulativo)", [
+      ["RP pessoal (5/10/21 km)", "+1 pto"], ["Ultrapassagem de posição", "+2 ptos"], ["Recorde Geral", "+3 ptos"],
+    ]],
+    ["Premiação por período", [
+      ["Melhor do mês (M e F separado)", "+3 ptos"], ["Melhor do semestre (M e F separado)", "+5 ptos"],
+    ]],
+    ["Validação", [
+      ["Distância mínima", "3 km"], ["Pace máximo (asfalto/pista)", "8'30\"/km"],
+      ["Trail com elevação +50m", "Pace livre"], ["Intervalo entre corridas/dia", "Mín. 4h"],
+      ["Esteira", "Não permitida"],
+    ]],
+    ["Divisões 2026", [
+      ["Série A", "1º ao 8º de 2025"], ["Série B", "9º em diante de 2025"],
+      ["Rebaixamento", "8º da Série A no final de 2026"], ["Acesso", "1º e 2º da Série B em 2026"],
+    ]],
+  ];
+
   return (
     <div>
-      {[
-        ["Pontuação por distância", [
-          ["3 – 6,99 km", "1 pto"], ["7 – 9,99 km", "2 ptos"], ["10 – 12,99 km", "3 ptos"],
-          ["13 – 16,99 km", "4 ptos"], ["17 – 20,99 km", "5 ptos"], ["21 – 24,99 km", "6 ptos"],
-          ["25 – 29,99 km", "7 ptos"], ["30 – 42,19 km", "9 ptos"], ["42,195 km+ (maratona)", "12 ptos"],
-        ]],
-        ["Bônus (não cumulativo)", [
-          ["RP pessoal (5/10/21 km)", "+1 pto"], ["Ultrapassagem de posição", "+2 ptos"], ["Recorde Geral", "+3 ptos"],
-        ]],
-        ["Premiação por período", [
-          ["Melhor do mês (M e F separado)", "+3 ptos"], ["Melhor do semestre (M e F separado)", "+5 ptos"],
-        ]],
-        ["Validação", [
-          ["Distância mínima", "3 km"], ["Pace máximo (asfalto/pista)", "8'30\"/km"],
-          ["Trail com elevação +50m", "Pace livre"], ["Intervalo entre corridas no mesmo dia", "Mín. 4h"],
-          ["Esteira", "Não permitida"],
-        ]],
-        ["Divisões 2026", [
-          ["Série A", "1º ao 8º de 2025"], ["Série B", "9º em diante de 2025"],
-          ["Rebaixamento", "8º da Série A no final de 2026"], ["Acesso", "1º e 2º da Série B em 2026"],
-        ]],
-      ].map(([title, items]) => (
+      {sections.map(([title, items]) => (
         <div key={title} style={{ marginBottom: 16 }}>
           <div style={{ fontSize: 12, fontWeight: 600, color: "#888", letterSpacing: ".5px", textTransform: "uppercase", marginBottom: 8 }}>{title}</div>
           <div style={{ background: "#fff", border: "0.5px solid #e5e5e3", borderRadius: 10, padding: "4px 14px" }}>
-            {rows(items)}
+            {items.map(([label, val]) => (
+              <div key={label} style={{ display: "flex", justifyContent: "space-between", padding: "7px 0", borderBottom: "0.5px solid #f0f0f0", fontSize: 13 }}>
+                <span style={{ color: "#666" }}>{label}</span>
+                <span style={{ fontWeight: 600, color: "#111" }}>{val}</span>
+              </div>
+            ))}
           </div>
         </div>
       ))}
@@ -403,33 +445,27 @@ function RegrasTab() {
   );
 }
 
-// ─── MODAL DE CORREDOR ───────────────────────────────────────
 function RunnerModal({ runner, onClose }) {
   const [activities, setActivities] = useState([]);
   const c = getAvatarColor(runner.id);
 
   useEffect(() => {
-    supabase.from("activities").select("*").eq("runner_id", runner.id).order("activity_date", { ascending: false }).limit(10)
+    supabase.from("activities").select("*").eq("runner_id", runner.id)
+      .order("activity_date", { ascending: false }).limit(10)
       .then(({ data }) => setActivities(data || []));
   }, [runner.id]);
 
   return (
-    <div onClick={onClose} style={{
-      position: "fixed", inset: 0, background: "rgba(0,0,0,.5)",
-      display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100, padding: 16,
-    }}>
-      <div onClick={e => e.stopPropagation()} style={{
-        background: "#fff", borderRadius: 16, padding: 20, width: "100%", maxWidth: 380,
-        maxHeight: "80vh", overflowY: "auto",
-      }}>
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100, padding: 16 }}>
+      <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 16, padding: 20, width: "100%", maxWidth: 380, maxHeight: "80vh", overflowY: "auto" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
             <div style={{ width: 44, height: 44, borderRadius: "50%", background: c.bg, color: c.fg, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 15 }}>
               {getInitials(runner.name)}
             </div>
             <div>
-              <div style={{ fontWeight: 600, fontSize: 16 }}>{runner.name}</div>
-              <div style={{ fontSize: 12, color: "#888" }}>Série {runner.serie} · {runner.gender === "M" ? "Masculino" : "Feminino"} {getBadge(runner.pts)}</div>
+              <div style={{ fontWeight: 600, fontSize: 16 }}>{runner.name} {getBadge(runner.pts)}</div>
+              <div style={{ fontSize: 12, color: "#888" }}>Série {runner.serie} · {runner.gender === "M" ? "Masculino" : "Feminino"}</div>
             </div>
           </div>
           <button onClick={onClose} style={{ background: "none", border: "none", fontSize: 22, cursor: "pointer", color: "#aaa" }}>×</button>
@@ -442,14 +478,12 @@ function RunnerModal({ runner, onClose }) {
             </div>
           ))}
         </div>
-        <div style={{ fontSize: 12, fontWeight: 600, color: "#888", letterSpacing: ".5px", textTransform: "uppercase", marginBottom: 8 }}>
-          Últimas atividades
-        </div>
+        <div style={{ fontSize: 12, fontWeight: 600, color: "#888", letterSpacing: ".5px", textTransform: "uppercase", marginBottom: 8 }}>Últimas atividades</div>
         {activities.length === 0 ? (
           <div style={{ fontSize: 13, color: "#bbb", padding: "8px 0" }}>Nenhuma atividade registrada ainda.</div>
         ) : activities.map(a => (
           <div key={a.id} style={{ display: "flex", justifyContent: "space-between", padding: "7px 0", borderBottom: "0.5px solid #f0f0f0", fontSize: 13 }}>
-            <span style={{ color: "#555" }}>{a.activity_date} · {parseFloat(a.distance_km).toFixed(1)} km {a.pace ? `· ${a.pace}/km` : ""}</span>
+            <span style={{ color: "#555" }}>{a.activity_date} · {parseFloat(a.distance_km).toFixed(1)} km{a.pace ? ` · ${a.pace}/km` : ""}</span>
             <span style={{ fontWeight: 700, color: "#1D9E75" }}>+{a.base_pts + a.bonus_pts} ptos</span>
           </div>
         ))}
@@ -458,7 +492,6 @@ function RunnerModal({ runner, onClose }) {
   );
 }
 
-// ─── APP PRINCIPAL ───────────────────────────────────────────
 export default function App() {
   const [tab, setTab] = useState("ranking");
   const [runners, setRunners] = useState([]);
@@ -488,20 +521,15 @@ export default function App() {
 
   return (
     <div style={{ maxWidth: 480, margin: "0 auto", padding: "16px 16px 80px", fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif", background: "#f5f5f3", minHeight: "100vh" }}>
-      {/* Header */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
         <div style={{ fontSize: 20, fontWeight: 700, letterSpacing: -0.5 }}>
-          Ester<span style={{ color: "#1D9E75" }}>Corrida</span>{" "}
-          <span style={{ fontSize: 13, fontWeight: 400, color: "#aaa" }}>2026</span>
+          Ester<span style={{ color: "#1D9E75" }}>Corrida</span>
+          <span style={{ fontSize: 13, fontWeight: 400, color: "#aaa" }}> 2026</span>
         </div>
-        <select
-          value={currentUser?.id || ""}
-          onChange={e => {
-            const r = runners.find(x => x.id === parseInt(e.target.value));
-            setCurrentUser(r || null);
-          }}
-          style={{ fontSize: 13, padding: "6px 10px", borderRadius: 8, border: "0.5px solid #ddd", background: "#fff", color: "#333", maxWidth: 140 }}
-        >
+        <select value={currentUser?.id || ""} onChange={e => {
+          const r = runners.find(x => x.id === parseInt(e.target.value));
+          setCurrentUser(r || null);
+        }} style={{ fontSize: 13, padding: "6px 10px", borderRadius: 8, border: "0.5px solid #ddd", background: "#fff", color: "#333", maxWidth: 140 }}>
           <option value="">Quem é você?</option>
           {[...runners].sort((a, b) => a.name.localeCompare(b.name)).map(r => (
             <option key={r.id} value={r.id}>{r.name} ({r.serie})</option>
@@ -509,7 +537,6 @@ export default function App() {
         </select>
       </div>
 
-      {/* Content */}
       {loading ? (
         <div style={{ textAlign: "center", padding: 40, color: "#aaa" }}>Carregando...</div>
       ) : (
@@ -521,27 +548,14 @@ export default function App() {
         </>
       )}
 
-      {/* Bottom Nav */}
-      <div style={{
-        position: "fixed", bottom: 0, left: 0, right: 0,
-        background: "#fff", borderTop: "0.5px solid #eee",
-        display: "flex", justifyContent: "space-around", padding: "8px 0 12px",
-        zIndex: 50,
-      }}>
+      <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, background: "#fff", borderTop: "0.5px solid #eee", display: "flex", justifyContent: "space-around", padding: "8px 0 12px", zIndex: 50 }}>
         {tabs.map(t => (
-          <button key={t} onClick={() => setTab(t)}
-            style={{
-              background: "none", border: "none", cursor: "pointer",
-              fontSize: 13, fontWeight: tab === t ? 700 : 400,
-              color: tab === t ? "#1D9E75" : "#999",
-              padding: "4px 12px",
-            }}>
+          <button key={t} onClick={() => setTab(t)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 13, fontWeight: tab === t ? 700 : 400, color: tab === t ? "#1D9E75" : "#999", padding: "4px 12px" }}>
             {tabLabels[t]}
           </button>
         ))}
       </div>
 
-      {/* Runner Modal */}
       {selectedRunner && <RunnerModal runner={selectedRunner} onClose={() => setSelectedRunner(null)} />}
     </div>
   );

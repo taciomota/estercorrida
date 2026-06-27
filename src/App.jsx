@@ -1,5 +1,5 @@
-// EsterCorrida 2026 — App React completo com Supabase + HF Vision via API Route
-import { useState, useEffect, useCallback, useRef } from "react";
+// EsterCorrida 2026 — App React completo com Supabase
+import { useState, useEffect, useCallback } from "react";
 import { createClient } from "@supabase/supabase-js";
 
 const SUPABASE_URL = "https://zwoiscpfxnzyxuyrsbwy.supabase.co";
@@ -24,6 +24,14 @@ function paceToSeconds(pace) {
   if (!pace || !pace.includes(":")) return 0;
   const [m, s] = pace.split(":").map(Number);
   return m * 60 + (s || 0);
+}
+
+function timeToSeconds(time) {
+  if (!time) return 0;
+  const parts = time.split(":").map(Number);
+  if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+  if (parts.length === 2) return parts[0] * 60 + parts[1];
+  return 0;
 }
 
 function validateActivity(dist, pace, terrain, elev) {
@@ -57,34 +65,6 @@ const AVATAR_COLORS = [
 
 function getAvatarColor(id) { return AVATAR_COLORS[(id - 1) % AVATAR_COLORS.length]; }
 function getInitials(name) { return name.split(" ").map(p => p[0]).slice(0, 2).join("").toUpperCase(); }
-
-async function analyzeRunImage(base64Image, mimeType) {
-  try {
-    const response = await fetch("/api/analyze", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ base64Image, mimeType })
-    });
-
-    if (!response.ok) {
-      const errBody = await response.text();
-      throw new Error("API erro " + response.status + ": " + errBody);
-    }
-
-    const data = await response.json();
-    const text = data?.choices?.[0]?.message?.content || "";
-    if (!text) throw new Error("Resposta vazia");
-
-    const clean = text.replace(/```json/g, "").replace(/```/g, "").trim();
-    const firstBrace = clean.indexOf("{");
-    const lastBrace = clean.lastIndexOf("}");
-    if (firstBrace === -1 || lastBrace === -1) throw new Error("JSON nao encontrado: " + clean);
-
-    return JSON.parse(clean.slice(firstBrace, lastBrace + 1));
-  } catch (err) {
-    return { erro: err.message || "Erro desconhecido" };
-  }
-}
 
 function Avatar({ runner, size = 38 }) {
   const c = getAvatarColor(runner.id);
@@ -173,7 +153,7 @@ function RankingTab({ runners, onSelectRunner }) {
   );
 }
 
-function RegistrarTab({ runners, currentUser, onSuccess }) {
+function RegistrarTab({ currentUser, onSuccess }) {
   const [dist, setDist] = useState("");
   const [pace, setPace] = useState("");
   const [elev, setElev] = useState("");
@@ -182,11 +162,7 @@ function RegistrarTab({ runners, currentUser, onSuccess }) {
   const [date, setDate] = useState(new Date().toISOString().split("T")[0]);
   const [notes, setNotes] = useState("");
   const [loading, setLoading] = useState(false);
-  const [analyzing, setAnalyzing] = useState(false);
   const [msg, setMsg] = useState(null);
-  const [previewImg, setPreviewImg] = useState(null);
-  const [appDetected, setAppDetected] = useState(null);
-  const fileRef = useRef();
 
   const distNum = parseFloat(dist) || 0;
   const elevNum = parseInt(elev) || 0;
@@ -195,38 +171,6 @@ function RegistrarTab({ runners, currentUser, onSuccess }) {
   const bonusPts = bonusMap[bonusType] || 0;
   const totalPts = basePts + bonusPts;
   const errors = distNum > 0 ? validateActivity(distNum, pace, terrain, elevNum) : [];
-
-  async function handleImageUpload(e) {
-    const file = e.target.files[0];
-    if (!file) return;
-    setAnalyzing(true);
-    setMsg(null);
-    setAppDetected(null);
-
-    const reader = new FileReader();
-    reader.onload = async (ev) => {
-      const base64Full = ev.target.result;
-      setPreviewImg(base64Full);
-      const base64 = base64Full.split(",")[1];
-      const mimeType = file.type;
-
-      const result = await analyzeRunImage(base64, mimeType);
-
-      if (result.erro) {
-        setMsg({ type: "err", text: "Erro: " + result.erro });
-      } else {
-        if (result.distancia_km) setDist(String(result.distancia_km));
-        if (result.pace) setPace(result.pace);
-        if (result.data) setDate(result.data);
-        if (result.elevacao_m) setElev(String(result.elevacao_m));
-        if (result.elevacao_m >= 50) setTerrain("trail");
-        setAppDetected(result.app_detectado);
-        setMsg({ type: "ok", text: "✓ Dados lidos! Confira os campos abaixo antes de registrar." });
-      }
-      setAnalyzing(false);
-    };
-    reader.readAsDataURL(file);
-  }
 
   async function submit() {
     if (!currentUser) { setMsg({ type: "err", text: "Selecione seu nome primeiro (topo da tela)." }); return; }
@@ -251,7 +195,7 @@ function RegistrarTab({ runners, currentUser, onSuccess }) {
         total_km: parseFloat((currentUser.total_km + distNum).toFixed(2)),
       }).eq("id", currentUser.id);
       setMsg({ type: "ok", text: `✓ Atividade registrada! +${totalPts} ptos para ${currentUser.name}` });
-      setDist(""); setPace(""); setElev(""); setBonusType("none"); setNotes(""); setPreviewImg(null); setAppDetected(null);
+      setDist(""); setPace(""); setElev(""); setBonusType("none"); setNotes("");
       onSuccess();
     } else {
       setMsg({ type: "err", text: "Erro ao salvar. Tente novamente." });
@@ -264,31 +208,6 @@ function RegistrarTab({ runners, currentUser, onSuccess }) {
 
   return (
     <div style={{ background: "#f8f8f7", borderRadius: 12, padding: 16, border: "0.5px solid #eee" }}>
-      <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={handleImageUpload} />
-      <div onClick={() => fileRef.current.click()}
-        style={{ border: "1.5px dashed #1D9E75", borderRadius: 12, padding: "16px", textAlign: "center", cursor: "pointer", marginBottom: 14, background: "#E1F5EE" }}
-      >
-        {analyzing ? (
-          <div>
-            <div style={{ fontSize: 28, marginBottom: 6 }}>🔍</div>
-            <div style={{ fontSize: 14, fontWeight: 500, color: "#0F6E56" }}>Analisando o print...</div>
-            <div style={{ fontSize: 12, color: "#5DCAA5", marginTop: 4 }}>A IA está lendo os dados da sua corrida</div>
-          </div>
-        ) : previewImg ? (
-          <div>
-            <img src={previewImg} alt="Print da corrida" style={{ maxHeight: 120, borderRadius: 8, marginBottom: 8, maxWidth: "100%" }} />
-            {appDetected && <div style={{ fontSize: 11, color: "#0F6E56", fontWeight: 500 }}>📱 {appDetected} · Toque para trocar</div>}
-          </div>
-        ) : (
-          <div>
-            <div style={{ fontSize: 32, marginBottom: 6 }}>📸</div>
-            <div style={{ fontSize: 14, fontWeight: 500, color: "#0F6E56" }}>Enviar print da corrida</div>
-            <div style={{ fontSize: 12, color: "#5DCAA5", marginTop: 4 }}>Strava, Garmin, Nike Run, Apple Watch...</div>
-            <div style={{ fontSize: 11, color: "#9FE1CB", marginTop: 2 }}>A IA preenche os campos automaticamente</div>
-          </div>
-        )}
-      </div>
-
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
         <div><label style={labelStyle}>Data</label><input type="date" value={date} onChange={e => setDate(e.target.value)} style={inputStyle} /></div>
         <div><label style={labelStyle}>Distância (km)</label><input type="number" placeholder="0.0" step="0.1" min="0" value={dist} onChange={e => setDist(e.target.value)} style={inputStyle} /></div>
@@ -334,8 +253,8 @@ function RegistrarTab({ runners, currentUser, onSuccess }) {
       {errors.length > 0 && <div style={{ background: "#FAEEDA", color: "#633806", padding: "8px 12px", borderRadius: 8, fontSize: 13, marginBottom: 10 }}>⚠ {errors[0]}</div>}
       {msg && <div style={{ background: msg.type === "ok" ? "#E1F5EE" : "#FCEBEB", color: msg.type === "ok" ? "#085041" : "#791F1F", padding: "8px 12px", borderRadius: 8, fontSize: 13, marginBottom: 10 }}>{msg.text}</div>}
 
-      <button onClick={submit} disabled={loading || errors.length > 0 || analyzing}
-        style={{ width: "100%", padding: "10px 0", borderRadius: 8, border: "none", background: (errors.length > 0 || analyzing) ? "#ccc" : "#1D9E75", color: "#fff", fontWeight: 600, fontSize: 15, cursor: (errors.length > 0 || analyzing) ? "not-allowed" : "pointer" }}>
+      <button onClick={submit} disabled={loading || errors.length > 0}
+        style={{ width: "100%", padding: "10px 0", borderRadius: 8, border: "none", background: errors.length > 0 ? "#ccc" : "#1D9E75", color: "#fff", fontWeight: 600, fontSize: 15, cursor: errors.length > 0 ? "not-allowed" : "pointer" }}>
         {loading ? "Registrando..." : "Registrar atividade"}
       </button>
     </div>
@@ -344,11 +263,16 @@ function RegistrarTab({ runners, currentUser, onSuccess }) {
 
 function RecordesTab({ records }) {
   const dists = ["5km", "10km", "21km", "42km"];
+
+  function sortByTime(list) {
+    return [...list].sort((a, b) => timeToSeconds(a.time_str) - timeToSeconds(b.time_str));
+  }
+
   return (
     <div>
       {dists.map(d => {
-        const masc = records.filter(r => r.distance === d && r.gender === "M").sort((a, b) => a.time_str.localeCompare(b.time_str));
-        const fem = records.filter(r => r.distance === d && r.gender === "F").sort((a, b) => a.time_str.localeCompare(b.time_str));
+        const masc = sortByTime(records.filter(r => r.distance === d && r.gender === "M"));
+        const fem = sortByTime(records.filter(r => r.distance === d && r.gender === "F"));
         return (
           <div key={d} style={{ marginBottom: 20 }}>
             <div style={{ fontSize: 12, fontWeight: 600, color: "#888", letterSpacing: ".5px", textTransform: "uppercase", marginBottom: 8 }}>Ranking {d}</div>
@@ -510,7 +434,7 @@ export default function App() {
       ) : (
         <>
           {tab === "ranking" && <RankingTab runners={runners} onSelectRunner={setSelectedRunner} />}
-          {tab === "registrar" && <RegistrarTab runners={runners} currentUser={currentUser} onSuccess={fetchData} />}
+          {tab === "registrar" && <RegistrarTab currentUser={currentUser} onSuccess={fetchData} />}
           {tab === "recordes" && <RecordesTab records={records} />}
           {tab === "regras" && <RegrasTab />}
         </>

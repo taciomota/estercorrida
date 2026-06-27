@@ -281,8 +281,8 @@ function RecordesTab({ records }) {
                 <div key={label} style={{ background: "#fff", border: "0.5px solid #e5e5e3", borderRadius: 10, padding: "10px 12px" }}>
                   <div style={{ fontSize: 11, color: "#aaa", marginBottom: 6 }}>{label}</div>
                   {list.length === 0 ? <div style={{ fontSize: 12, color: "#ccc" }}>—</div> :
-                    list.slice(0, 5).map((r, i) => (
-                      <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 13, padding: "4px 0", borderBottom: i < Math.min(list.length, 5) - 1 ? "0.5px solid #f0f0f0" : "none" }}>
+                    list.map((r, i) => (
+                      <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 13, padding: "4px 0", borderBottom: i < list.length - 1 ? "0.5px solid #f0f0f0" : "none" }}>
                         <span style={{ color: "#555" }}>{i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : `${i + 1}.`} {r.runner_name}</span>
                         <span style={{ fontWeight: 600, color: "#111" }}>{r.time_str}</span>
                       </div>

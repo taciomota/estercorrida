@@ -1,10 +1,9 @@
-// EsterCorrida 2026 — App React completo com Supabase + Hugging Face Vision
+// EsterCorrida 2026 — App React completo com Supabase + HF Vision via API Route
 import { useState, useEffect, useCallback, useRef } from "react";
 import { createClient } from "@supabase/supabase-js";
 
 const SUPABASE_URL = "https://zwoiscpfxnzyxuyrsbwy.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp3b2lzY3BmeG56eXh1eXJzYnd5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIzOTEwMDEsImV4cCI6MjA5Nzk2NzAwMX0.cDAIBk7KQotxmSMzRCJSyj-jUrsGu4gqmO3lhP8bWW4";
-
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
@@ -82,67 +81,6 @@ async function analyzeRunImage(base64Image, mimeType) {
     if (firstBrace === -1 || lastBrace === -1) throw new Error("JSON nao encontrado: " + clean);
 
     return JSON.parse(clean.slice(firstBrace, lastBrace + 1));
-  } catch (err) {
-    return { erro: err.message || "Erro desconhecido" };
-  }
-}
-  const prompt = `You are analyzing a running app screenshot (Strava, Garmin, Nike Run, Apple Watch, etc).
-
-Extract the running data visible in this image and respond ONLY with valid JSON, no extra text:
-
-{
-  "distancia_km": distance in km as number (ex: 10.2),
-  "pace": average pace as "M:SS" per km (ex: "5:30"),
-  "data": date as "YYYY-MM-DD" if visible, otherwise null,
-  "elevacao_m": elevation gain in meters as number, 0 if not visible,
-  "app_detectado": name of the app or device detected,
-  "confianca": "alta"
-}
-
-If you cannot identify the distance, respond with {"erro": "nao identificado"}.`;
-
-  try {
-    const response = await fetch(
-      "https://api-inference.huggingface.co/models/meta-llama/Llama-3.2-11B-Vision-Instruct/v1/chat/completions",
-      {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${HF_TOKEN}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: "meta-llama/Llama-3.2-11B-Vision-Instruct",
-          messages: [
-            {
-              role: "user",
-              content: [
-                { type: "text", text: prompt },
-                { type: "image_url", image_url: { url: `data:${mimeType};base64,${base64Image}` } }
-              ]
-            }
-          ],
-          max_tokens: 512,
-          temperature: 0.1,
-        })
-      }
-    );
-
-    if (!response.ok) {
-      const errBody = await response.text();
-      throw new Error("API erro " + response.status + ": " + errBody);
-    }
-
-    const data = await response.json();
-    const text = data?.choices?.[0]?.message?.content || "";
-    if (!text) throw new Error("Resposta vazia da API");
-
-    const clean = text.replace(/```json/g, "").replace(/```/g, "").trim();
-    const firstBrace = clean.indexOf("{");
-    const lastBrace = clean.lastIndexOf("}");
-    if (firstBrace === -1 || lastBrace === -1) throw new Error("JSON nao encontrado: " + clean);
-
-    return JSON.parse(clean.slice(firstBrace, lastBrace + 1));
-
   } catch (err) {
     return { erro: err.message || "Erro desconhecido" };
   }
@@ -283,7 +221,7 @@ function RegistrarTab({ runners, currentUser, onSuccess }) {
         if (result.elevacao_m) setElev(String(result.elevacao_m));
         if (result.elevacao_m >= 50) setTerrain("trail");
         setAppDetected(result.app_detectado);
-        setMsg({ type: "ok", text: `✓ Dados lidos! Confira os campos abaixo antes de registrar.` });
+        setMsg({ type: "ok", text: "✓ Dados lidos! Confira os campos abaixo antes de registrar." });
       }
       setAnalyzing(false);
     };

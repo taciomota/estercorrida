@@ -4,7 +4,7 @@ import { createClient } from "@supabase/supabase-js";
 
 const SUPABASE_URL = "https://zwoiscpfxnzyxuyrsbwy.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp3b2lzY3BmeG56eXh1eXJzYnd5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIzOTEwMDEsImV4cCI6MjA5Nzk2NzAwMX0.cDAIBk7KQotxmSMzRCJSyj-jUrsGu4gqmO3lhP8bWW4";
-const HF_TOKEN = process.env.REACT_APP_HF_TOKEN;
+
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
@@ -60,6 +60,32 @@ function getAvatarColor(id) { return AVATAR_COLORS[(id - 1) % AVATAR_COLORS.leng
 function getInitials(name) { return name.split(" ").map(p => p[0]).slice(0, 2).join("").toUpperCase(); }
 
 async function analyzeRunImage(base64Image, mimeType) {
+  try {
+    const response = await fetch("/api/analyze", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ base64Image, mimeType })
+    });
+
+    if (!response.ok) {
+      const errBody = await response.text();
+      throw new Error("API erro " + response.status + ": " + errBody);
+    }
+
+    const data = await response.json();
+    const text = data?.choices?.[0]?.message?.content || "";
+    if (!text) throw new Error("Resposta vazia");
+
+    const clean = text.replace(/```json/g, "").replace(/```/g, "").trim();
+    const firstBrace = clean.indexOf("{");
+    const lastBrace = clean.lastIndexOf("}");
+    if (firstBrace === -1 || lastBrace === -1) throw new Error("JSON nao encontrado: " + clean);
+
+    return JSON.parse(clean.slice(firstBrace, lastBrace + 1));
+  } catch (err) {
+    return { erro: err.message || "Erro desconhecido" };
+  }
+}
   const prompt = `You are analyzing a running app screenshot (Strava, Garmin, Nike Run, Apple Watch, etc).
 
 Extract the running data visible in this image and respond ONLY with valid JSON, no extra text:

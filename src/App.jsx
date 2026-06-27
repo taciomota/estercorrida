@@ -1,11 +1,10 @@
-// EsterCorrida 2026 — App React completo com Supabase + Gemini Vision
+// EsterCorrida 2026 — App React completo com Supabase + Hugging Face Vision
 import { useState, useEffect, useCallback, useRef } from "react";
 import { createClient } from "@supabase/supabase-js";
 
 const SUPABASE_URL = "https://zwoiscpfxnzyxuyrsbwy.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp3b2lzY3BmeG56eXh1eXJzYnd5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIzOTEwMDEsImV4cCI6MjA5Nzk2NzAwMX0.cDAIBk7KQotxmSMzRCJSyj-jUrsGu4gqmO3lhP8bWW4";
-const GEMINI_API_KEY = process.env.REACT_APP_GEMINI_KEY;
-const GEMINI_URL = `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash-latest:generateContent?key=${GEMINI_API_KEY}`;
+const HF_TOKEN = process.env.REACT_APP_HF_TOKEN;
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
@@ -61,35 +60,46 @@ function getAvatarColor(id) { return AVATAR_COLORS[(id - 1) % AVATAR_COLORS.leng
 function getInitials(name) { return name.split(" ").map(p => p[0]).slice(0, 2).join("").toUpperCase(); }
 
 async function analyzeRunImage(base64Image, mimeType) {
-  const prompt = `Você é um assistente especializado em leitura de prints de apps de corrida (Strava, Garmin, Nike Run, Apple Watch, relógios esportivos, etc).
+  const prompt = `You are analyzing a running app screenshot (Strava, Garmin, Nike Run, Apple Watch, etc).
 
-Analise esta imagem e extraia SOMENTE os dados de corrida visíveis. Responda APENAS com JSON válido, sem texto extra:
+Extract the running data visible in this image and respond ONLY with valid JSON, no extra text:
 
 {
-  "distancia_km": número em km (ex: 10.2),
-  "pace": "M:SS" (pace médio por km, ex: "5:30"),
-  "data": "YYYY-MM-DD" (data da corrida se visível, senão null),
-  "elevacao_m": número em metros (ganho de elevação, 0 se não visível),
-  "app_detectado": "nome do app ou dispositivo",
+  "distancia_km": distance in km as number (ex: 10.2),
+  "pace": average pace as "M:SS" per km (ex: "5:30"),
+  "data": date as "YYYY-MM-DD" if visible, otherwise null,
+  "elevacao_m": elevation gain in meters as number, 0 if not visible,
+  "app_detectado": name of the app or device detected,
   "confianca": "alta"
 }
 
-Se não conseguir identificar a distância, retorne {"erro": "nao identificado"}.`;
+If you cannot identify the distance, respond with {"erro": "nao identificado"}.`;
 
   try {
-    const response = await fetch(GEMINI_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{
-          parts: [
-            { text: prompt },
-            { inline_data: { mime_type: mimeType, data: base64Image } }
-          ]
-        }],
-        generationConfig: { temperature: 0.1, maxOutputTokens: 512 }
-      })
-    });
+    const response = await fetch(
+      "https://api-inference.huggingface.co/models/meta-llama/Llama-3.2-11B-Vision-Instruct/v1/chat/completions",
+      {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${HF_TOKEN}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: "meta-llama/Llama-3.2-11B-Vision-Instruct",
+          messages: [
+            {
+              role: "user",
+              content: [
+                { type: "text", text: prompt },
+                { type: "image_url", image_url: { url: `data:${mimeType};base64,${base64Image}` } }
+              ]
+            }
+          ],
+          max_tokens: 512,
+          temperature: 0.1,
+        })
+      }
+    );
 
     if (!response.ok) {
       const errBody = await response.text();
@@ -97,7 +107,7 @@ Se não conseguir identificar a distância, retorne {"erro": "nao identificado"}
     }
 
     const data = await response.json();
-    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+    const text = data?.choices?.[0]?.message?.content || "";
     if (!text) throw new Error("Resposta vazia da API");
 
     const clean = text.replace(/```json/g, "").replace(/```/g, "").trim();
@@ -291,8 +301,7 @@ function RegistrarTab({ runners, currentUser, onSuccess }) {
   return (
     <div style={{ background: "#f8f8f7", borderRadius: 12, padding: 16, border: "0.5px solid #eee" }}>
       <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={handleImageUpload} />
-      <div
-        onClick={() => fileRef.current.click()}
+      <div onClick={() => fileRef.current.click()}
         style={{ border: "1.5px dashed #1D9E75", borderRadius: 12, padding: "16px", textAlign: "center", cursor: "pointer", marginBottom: 14, background: "#E1F5EE" }}
       >
         {analyzing ? (
@@ -317,22 +326,10 @@ function RegistrarTab({ runners, currentUser, onSuccess }) {
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
-        <div>
-          <label style={labelStyle}>Data</label>
-          <input type="date" value={date} onChange={e => setDate(e.target.value)} style={inputStyle} />
-        </div>
-        <div>
-          <label style={labelStyle}>Distância (km)</label>
-          <input type="number" placeholder="0.0" step="0.1" min="0" value={dist} onChange={e => setDist(e.target.value)} style={inputStyle} />
-        </div>
-        <div>
-          <label style={labelStyle}>Pace (min/km)</label>
-          <input type="text" placeholder="5:30" value={pace} onChange={e => setPace(e.target.value)} style={inputStyle} />
-        </div>
-        <div>
-          <label style={labelStyle}>Elevação (m)</label>
-          <input type="number" placeholder="0" min="0" value={elev} onChange={e => setElev(e.target.value)} style={inputStyle} />
-        </div>
+        <div><label style={labelStyle}>Data</label><input type="date" value={date} onChange={e => setDate(e.target.value)} style={inputStyle} /></div>
+        <div><label style={labelStyle}>Distância (km)</label><input type="number" placeholder="0.0" step="0.1" min="0" value={dist} onChange={e => setDist(e.target.value)} style={inputStyle} /></div>
+        <div><label style={labelStyle}>Pace (min/km)</label><input type="text" placeholder="5:30" value={pace} onChange={e => setPace(e.target.value)} style={inputStyle} /></div>
+        <div><label style={labelStyle}>Elevação (m)</label><input type="number" placeholder="0" min="0" value={elev} onChange={e => setElev(e.target.value)} style={inputStyle} /></div>
         <div>
           <label style={labelStyle}>Terreno</label>
           <select value={terrain} onChange={e => setTerrain(e.target.value)} style={inputStyle}>
@@ -435,7 +432,6 @@ function RegrasTab() {
       ["Rebaixamento", "8º da Série A no final de 2026"], ["Acesso", "1º e 2º da Série B em 2026"],
     ]],
   ];
-
   return (
     <div>
       {sections.map(([title, items]) => (
@@ -458,13 +454,11 @@ function RegrasTab() {
 function RunnerModal({ runner, onClose }) {
   const [activities, setActivities] = useState([]);
   const c = getAvatarColor(runner.id);
-
   useEffect(() => {
     supabase.from("activities").select("*").eq("runner_id", runner.id)
       .order("activity_date", { ascending: false }).limit(10)
       .then(({ data }) => setActivities(data || []));
   }, [runner.id]);
-
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100, padding: 16 }}>
       <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 16, padding: 20, width: "100%", maxWidth: 380, maxHeight: "80vh", overflowY: "auto" }}>

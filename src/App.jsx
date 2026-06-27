@@ -280,7 +280,7 @@ function RegistrarTab({ runners, currentUser, onSuccess }) {
 
   return (
     <div style={{ background: "#f8f8f7", borderRadius: 12, padding: 16, border: "0.5px solid #eee" }}>
-      <input ref={fileRef} type="file" accept="image/*" capture="environment" style={{ display: "none" }} onChange={handleImageUpload} />
+      <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={handleImageUpload} />
       <div
         onClick={() => fileRef.current.click()}
         style={{ border: "1.5px dashed #1D9E75", borderRadius: 12, padding: "16px", textAlign: "center", cursor: "pointer", marginBottom: 14, background: "#E1F5EE" }}
